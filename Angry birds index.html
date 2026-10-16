@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angry Birds Physics: Grammar Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Open+Sans:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Open Sans', sans-serif;
+            background: #4ec0ca;
+            user-select: none;
+            touch-action: none;
+        }
+        .bangers { font-family: 'Bangers', cursive; }
+        
+        #game-canvas {
+            display: block;
+            background: linear-gradient(to bottom, #87CEEB 0%, #e0f6ff 60%, #7cfc00 60%, #228b22 100%);
+            cursor: crosshair;
+        }
+
+        .ui-layer {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .hud {
+            width: 100%;
+            padding: 25px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: auto;
+        }
+
+        .question-box {
+            position: absolute;
+            top: 15%;
+            width: 95%;
+            max-width: 850px;
+            background: white;
+            border: 8px solid #f1c40f;
+            border-radius: 30px;
+            padding: 40px;
+            text-align: center;
+            pointer-events: auto;
+            box-shadow: 0 15px 0 rgba(0,0,0,0.2);
+            display: none;
+            z-index: 50;
+        }
+
+        .btn-choice {
+            background: #f1c40f;
+            padding: 15px 30px;
+            border-radius: 15px;
+            margin: 10px;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 6px 0 #c29d0b;
+            transition: all 0.1s;
+            color: #2d3436;
+            min-width: 220px;
+        }
+
+        .btn-choice:active {
+            transform: translateY(3px);
+            box-shadow: 0 3px 0 #c29d0b;
+        }
+
+        #start-screen {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            pointer-events: auto;
+        }
+
+        .feedback-msg {
+            position: absolute;
+            top: 45%;
+            font-size: 6rem;
+            display: none;
+            text-shadow: 6px 6px 0px black;
+            z-index: 60;
+            text-align: center;
+            width: 100%;
+        }
+
+        #question-text {
+            font-size: 2.8rem;
+            line-height: 1.4;
+            color: #2d3436;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1 class="bangers text-9xl text-yellow-400 mb-6 text-center drop-shadow-2xl">ANGRY GRAMMAR</h1>
+        <p class="text-white text-3xl mb-10 text-center px-4 bangers tracking-wide">
+            1. Answer the grammar question.<br>
+            2. Pull the bird back and RELEASE to fly!
+        </p>
+        <button id="start-btn" class="bangers bg-red-600 text-white text-5xl px-16 py-6 rounded-full hover:bg-red-500 transition-transform hover:scale-105 shadow-2xl">PLAY NOW</button>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <div class="ui-layer">
+        <div class="hud">
+            <div class="bangers text-6xl text-white outline-black" style="-webkit-text-stroke: 2px black;">SCORE: <span id="score-val">0</span></div>
+            <button onclick="location.reload()" class="bg-gray-800 text-white px-6 py-3 rounded-xl bangers text-3xl hover:bg-black transition">RESTART</button>
+        </div>
+
+        <div id="question-box" class="question-box">
+            <p class="text-gray-400 uppercase tracking-widest text-lg font-bold mb-4 bangers">Pick the correct answer:</p>
+            <h2 id="question-text" class="bangers mb-8">Sentence goes here...</h2>
+            <div id="options-container" class="flex justify-center flex-wrap"></div>
+        </div>
+
+        <div id="feedback" class="feedback-msg bangers"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score-val');
+        const qBox = document.getElementById('question-box');
+        const qText = document.getElementById('question-text');
+        const optContainer = document.getElementById('options-container');
+        const feedbackEl = document.getElementById('feedback');
+
+        let width, height;
+        let score = 0;
+        let gameActive = false;
+        let birdReady = false;
+        let isDragging = false;
+        let resettingLevel = false;
+        
+        const slingX = 250;
+        let slingY = 0;
+
+        let bird = { x: 0, y: 0, r: 35, vx: 0, vy: 0, active: false };
+        let targets = [];
+        let particles = [];
+
+        const GRAVITY = 0.48; 
+        const POWER = 0.48; 
+
+        // 30 Unique, Non-Repeating Grammar Questions
+        const questions = [
+            { q: "My cat is ___ than your dog.", a: "bigger", o: ["big", "bigger", "biggest"] },
+            { q: "This is the ___ house in the street.", a: "tallest", o: ["tall", "taller", "tallest"] },
+            { q: "A plane is ___ than a bus.", a: "faster", o: ["fast", "faster", "fastest"] },
+            { q: "The green book is ___ than the red book.", a: "thinner", o: ["thin", "thinner", "thinnest"] },
+            { q: "Elephants are the ___ land animals.", a: "heaviest", o: ["heavy", "heavier", "heaviest"] },
+            { q: "Today is the ___ day of my life!", a: "best", o: ["good", "better", "best"] },
+            { q: "This phone is ___ than that one.", a: "newer", o: ["new", "newer", "newest"] },
+            { q: "A turtle is ___ than a rabbit.", a: "slower", o: ["slow", "slower", "slowest"] },
+            { q: "Milk is ___ than soda.", a: "healthier", o: ["healthy", "healthier", "healthiest"] },
+            { q: "The sun is ___ than the moon.", a: "brighter", o: ["bright", "brighter", "brightest"] },
+            { q: "Ice cream is ___ than soup.", a: "colder", o: ["cold", "colder", "coldest"] },
+            { q: "That was the ___ movie I ever saw.", a: "scariest", o: ["scary", "scarier", "scariest"] },
+            { q: "A giraffe is ___ than a horse.", a: "taller", o: ["tall", "taller", "tallest"] },
+            { q: "This is the ___ cake in the world!", a: "sweetest", o: ["sweet", "sweeter", "sweetest"] },
+            { q: "A feather is ___ than a rock.", a: "lighter", o: ["light", "lighter", "lightest"] },
+            { q: "The kitchen is the ___ room in the house.", a: "hottest", o: ["hot", "hotter", "hottest"] },
+            { q: "My brother is ___ than me.", a: "younger", o: ["young", "younger", "youngest"] },
+            { q: "This is the ___ puppy in the shop.", a: "cutest", o: ["cute", "cuter", "cutest"] },
+            { q: "The library is the ___ place I know.", a: "quietest", o: ["quiet", "quieter", "quietest"] },
+            { q: "Iron is ___ than wood.", a: "harder", o: ["hard", "harder", "hardest"] },
+            { q: "The blue whale is the ___ animal.", a: "largest", o: ["large", "larger", "largest"] },
+            { q: "Your room is ___ than mine.", a: "cleaner", o: ["clean", "cleaner", "cleanest"] },
+            { q: "This puzzle is the ___ of all.", a: "hardest", o: ["hard", "harder", "hardest"] },
+            { q: "That was the ___ joke ever!", a: "funniest", o: ["funny", "funnier", "funniest"] },
+            { q: "The ocean is ___ than a lake.", a: "deeper", o: ["deep", "deeper", "deepest"] },
+            { q: "Winter is the ___ season.", a: "coldest", o: ["cold", "colder", "coldest"] },
+            { q: "This bed is ___ than the sofa.", a: "softer", o: ["soft", "softer", "softest"] },
+            { q: "Cotton candy is ___ than popcorn.", a: "stickier", o: ["sticky", "stickier", "stickiest"] },
+            { q: "A diamond is ___ than a piece of glass.", a: "shinier", o: ["shiny", "shinier", "shiniest"] },
+            { q: "The tortoise was ___ than the hare.", a: "steadier", o: ["steady", "steadier", "steadiest"] }
+        ];
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            slingY = height * 0.7;
+            if(!bird.active) resetBirdToSling(false);
+            if(targets.length === 0) spawnTargets();
+        }
+
+        window.addEventListener('resize', resize);
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = (e.clientX || (e.touches && e.touches[0].clientX));
+            const clientY = (e.clientY || (e.touches && e.touches[0].clientY));
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function startDrag(e) {
+            if (!birdReady || bird.active || resettingLevel) return;
+            const pos = getMousePos(e);
+            const dist = Math.hypot(pos.x - bird.x, pos.y - bird.y);
+            if (dist < 150) isDragging = true;
+        }
+
+        function doDrag(e) {
+            if (!isDragging) return;
+            const pos = getMousePos(e);
+            const dx = pos.x - slingX;
+            const dy = pos.y - (slingY - 20); 
+            const maxStretch = 300; 
+            const dist = Math.min(maxStretch, Math.hypot(dx, dy));
+            const angle = Math.atan2(dy, dx);
+            bird.x = slingX + Math.cos(angle) * dist;
+            bird.y = (slingY - 20) + Math.sin(angle) * dist;
+        }
+
+        function endDrag() {
+            if (!isDragging) return;
+            isDragging = false;
+            const dx = slingX - bird.x;
+            const dy = (slingY - 20) - bird.y;
+            const launchDist = Math.hypot(dx, dy);
+            if (launchDist > 20) {
+                bird.vx = dx * POWER;
+                bird.vy = dy * POWER;
+                bird.active = true;
+                birdReady = false;
+            } else {
+                bird.x = slingX;
+                bird.y = slingY - 20;
+            }
+        }
+
+        canvas.addEventListener('mousedown', startDrag);
+        window.addEventListener('mousemove', doDrag);
+        window.addEventListener('mouseup', endDrag);
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDrag(e); }, {passive: false});
+        window.addEventListener('touchmove', (e) => { e.preventDefault(); doDrag(e); }, {passive: false});
+        window.addEventListener('touchend', endDrag);
+
+        function spawnTargets() {
+            targets = [];
+            const startX = (width * 0.6) + (Math.random() * (width * 0.2));
+            const groundY = height * 0.7;
+            const blockW = 120;
+            const pigSize = 55;
+            for (let floor = 0; floor < 3; floor++) {
+                const floorY = groundY - (floor * 90);
+                targets.push({ x: startX, y: floorY - 65, w: 20, h: 65, hp: 1, type: 'block' });
+                targets.push({ x: startX + blockW - 20, y: floorY - 65, w: 20, h: 65, hp: 1, type: 'block' });
+                targets.push({ x: startX - 10, y: floorY - 80, w: blockW + 20, h: 15, hp: 2, type: 'block' });
+                targets.push({ x: startX + 32, y: floorY - 50, w: pigSize, h: pigSize, hp: 1, type: 'pig' });
+            }
+            targets.push({ x: startX + 30, y: groundY - (3 * 90) - 70, w: pigSize + 25, h: pigSize + 25, hp: 1, type: 'pig' });
+        }
+
+        function resetBirdToSling(triggerQuestion = true) {
+            if (resettingLevel) return;
+            bird.x = slingX;
+            bird.y = slingY - 20;
+            bird.vx = 0; bird.vy = 0;
+            bird.active = false;
+            birdReady = false;
+            if (triggerQuestion) showQuestion();
+        }
+
+        function showQuestion() {
+            const q = questions[Math.floor(Math.random() * questions.length)];
+            qText.innerText = q.q;
+            optContainer.innerHTML = '';
+            q.o.forEach(option => {
+                const btn = document.createElement('button');
+                btn.className = 'btn-choice bangers';
+                btn.innerText = option;
+                btn.onclick = () => {
+                    if (option === q.a) handleCorrect();
+                    else handleWrong(btn);
+                };
+                optContainer.appendChild(btn);
+            });
+            qBox.style.display = 'block';
+        }
+
+        function handleCorrect() {
+            qBox.style.display = 'none';
+            birdReady = true;
+            score += 10;
+            updateUI();
+            showFeedback("READY!", "#2ecc71");
+        }
+
+        function handleWrong(btn) {
+            btn.style.background = "#ff4d4d";
+            btn.style.color = "white";
+            showFeedback("NO...", "#e74c3c");
+            setTimeout(() => {
+                btn.style.background = "#f1c40f";
+                btn.style.color = "#2d3436";
+            }, 600);
+        }
+
+        function showFeedback(text, color, duration = 1200) {
+            feedbackEl.innerText = text;
+            feedbackEl.style.color = color;
+            feedbackEl.style.display = 'block';
+            setTimeout(() => feedbackEl.style.display = 'none', duration);
+        }
+
+        function updateUI() { scoreEl.innerText = score; }
+
+        function createExplosion(x, y, color) {
+            for(let i=0; i<25; i++) {
+                particles.push({
+                    x, y, 
+                    vx: (Math.random() - 0.5) * 18,
+                    vy: (Math.random() - 0.5) * 18,
+                    life: 1, color
+                });
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+            if (bird.active) {
+                bird.vx *= 0.995;
+                bird.vy += GRAVITY;
+                bird.x += bird.vx;
+                bird.y += bird.vy;
+                const ground = height * 0.7;
+                if (bird.y > ground) {
+                    bird.y = ground;
+                    bird.vx *= 0.6; bird.vy *= -0.2;
+                    if (Math.abs(bird.vx) < 1.5) {
+                        bird.active = false;
+                        checkLevelComplete();
+                    }
+                }
+                targets.forEach((t, index) => {
+                    if (bird.x + bird.r > t.x && bird.x - bird.r < t.x + t.w &&
+                        bird.y + bird.r > t.y && bird.y - bird.r < t.y + t.h) {
+                        t.hp--;
+                        score += 50;
+                        updateUI();
+                        createExplosion(t.x + t.w/2, t.y + t.h/2, t.type === 'pig' ? '#90ee90' : '#8b4513');
+                        if (t.hp <= 0) targets.splice(index, 1);
+                        bird.vx *= 0.75;
+                    }
+                });
+                if (bird.x > width + 400 || bird.x < -400 || bird.y < -5000) {
+                    bird.active = false;
+                    checkLevelComplete();
+                }
+            }
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy;
+                p.life -= 0.035;
+                if(p.life <= 0) particles.splice(i, 1);
+            });
+        }
+
+        function checkLevelComplete() {
+            const pigsRemaining = targets.some(t => t.type === 'pig');
+            if (!pigsRemaining && !resettingLevel) {
+                resettingLevel = true;
+                score += 500;
+                updateUI();
+                showFeedback("TOWER DESTROYED!", "#f1c40f", 2500);
+                setTimeout(() => {
+                    spawnTargets();
+                    resettingLevel = false;
+                    resetBirdToSling(true);
+                }, 2500);
+            } else if (!resettingLevel) {
+                setTimeout(() => resetBirdToSling(true), 800);
+            }
+        }
+
+        function drawSlingshot() {
+            const topY = slingY - 40;
+            const leftArmX = slingX - 35;
+            const rightArmX = slingX + 35;
+            if (isDragging || birdReady) {
+                ctx.strokeStyle = '#3d1e0f';
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.moveTo(rightArmX, topY); ctx.lineTo(bird.x, bird.y);
+                ctx.stroke();
+            }
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 18;
+            ctx.beginPath();
+            ctx.moveTo(slingX, height * 0.7); ctx.lineTo(slingX, slingY);
+            ctx.lineTo(leftArmX, topY);
+            ctx.moveTo(slingX, slingY); ctx.lineTo(rightArmX, topY);
+            ctx.stroke();
+            if (isDragging || birdReady) {
+                ctx.strokeStyle = '#5a2d17'; ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.moveTo(leftArmX, topY); ctx.lineTo(bird.x, bird.y);
+                ctx.stroke();
+                if (isDragging) {
+                    ctx.fillStyle = '#222';
+                    ctx.save();
+                    ctx.translate(bird.x, bird.y);
+                    const angle = Math.atan2(bird.y - (slingY-20), bird.x - slingX);
+                    ctx.rotate(angle);
+                    ctx.fillRect(-10, -25, 20, 50);
+                    ctx.restore();
+                }
+            }
+        }
+
+        function drawTrajectory() {
+            if (!isDragging) return;
+            let tx = bird.x; let ty = bird.y;
+            let tvx = (slingX - bird.x) * POWER;
+            let tvy = ((slingY - 20) - bird.y) * POWER;
+            for (let i = 0; i < 120; i++) {
+                tx += tvx; tvy += GRAVITY; ty += tvy;
+                if (i % 2 === 0) {
+                    const alpha = 1 - (i / 120);
+                    ctx.fillStyle = i < 20 ? `rgba(255, 255, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+                    ctx.beginPath(); ctx.arc(tx, ty, 8 - (i * 0.06), 0, Math.PI * 2); ctx.fill();
+                }
+                if (ty > height * 0.7) break;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#228b22'; ctx.fillRect(0, height * 0.7, width, height * 0.3);
+            drawSlingshot(); drawTrajectory();
+            targets.forEach(t => {
+                ctx.fillStyle = t.type === 'pig' ? '#90ee90' : '#8b4513';
+                ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+                if(t.type === 'pig') {
+                    ctx.beginPath(); ctx.arc(t.x + t.w/2, t.y + t.h/2, t.w/2, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+                    ctx.fillStyle = 'black'; ctx.font = `34px Arial`;
+                    ctx.fillText('🐽', t.x + t.w*0.05, t.y + t.h*0.75);
+                } else {
+                    ctx.fillRect(t.x, t.y, t.w, t.h); ctx.strokeRect(t.x, t.y, t.w, t.h);
+                }
+            });
+            if ((birdReady || bird.active || isDragging) && !resettingLevel) {
+                if (birdReady && !bird.active && !isDragging) {
+                    ctx.shadowBlur = 40; ctx.shadowColor = 'white';
+                }
+                ctx.fillStyle = birdReady ? '#e74c3c' : (bird.active ? '#c0392b' : '#bdc3c7');
+                ctx.beginPath(); ctx.arc(bird.x, bird.y, bird.r, 0, Math.PI*2); ctx.fill();
+                ctx.shadowBlur = 0; ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.stroke();
+                ctx.font = '45px Arial'; ctx.fillText('🔴', bird.x - 26, bird.y + 16);
+            }
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+            requestAnimationFrame(() => { update(); draw(); });
+        }
+
+        document.getElementById('start-btn').onclick = () => {
+            document.getElementById('start-screen').style.display = 'none';
+            gameActive = true; resize(); draw(); showQuestion();
+        };
+        resize();
+    </script>
+</body>
+</html>
